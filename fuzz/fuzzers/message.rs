@@ -3,13 +3,14 @@
 extern crate libfuzzer_sys;
 extern crate rustls;
 
-use rustls::internal::msgs::codec::Reader;
 use rustls::internal::msgs::message::{Message, PlainMessage, OpaqueMessage};
 
 fuzz_target!(|data: &[u8]| {
-    let mut rdr = Reader::init(data);
-    if let Ok(m) = OpaqueMessage::read(&mut rdr) {
-        let msg = match Message::try_from(m.into_plain_message()) {
+    let mut buf = data.to_vec();
+    if let Ok(m) = OpaqueMessage::read(&mut buf) {
+        let used = m.len();
+        let plain = m.to_plain_message();
+        let msg = match Message::try_from(plain) {
             Ok(msg) => msg,
             Err(_) => return,
         };
@@ -18,6 +19,6 @@ fuzz_target!(|data: &[u8]| {
             .into_unencrypted_opaque()
             .encode();
         //println!("data = {:?}", &data[..rdr.used()]);
-        assert_eq!(enc, data[..rdr.used()]);
+        assert_eq!(enc, data[..used]);
     }
 });

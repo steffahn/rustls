@@ -1,11 +1,10 @@
 use crate::cipher::{make_nonce, Iv, MessageDecrypter, MessageEncrypter};
 use crate::enums::{CipherSuite, ProtocolVersion};
 use crate::error::Error;
-use crate::msgs::base::Payload;
 use crate::msgs::codec::Codec;
 use crate::msgs::enums::ContentType;
 use crate::msgs::fragmenter::MAX_FRAGMENT_LEN;
-use crate::msgs::message::{BorrowedPlainMessage, OpaqueMessage, PlainMessage};
+use crate::msgs::message::{BorrowedPlainMessage, Buffer, OpaqueMessage, PlainMessage};
 use crate::suites::{BulkAlgorithm, CipherSuiteCommon, SupportedCipherSuite};
 
 use ring::aead;
@@ -119,14 +118,19 @@ struct Tls13MessageDecrypter {
     iv: Iv,
 }
 
-fn unpad_tls13(v: &mut Vec<u8>) -> ContentType {
-    loop {
-        match v.pop() {
-            Some(0) => {}
-            Some(content_type) => return ContentType::from(content_type),
-            None => return ContentType::Unknown(0),
+fn unpad_tls13(v: &mut Buffer<'_>) -> ContentType {
+    let slice = v.as_ref();
+    let pos = match slice.iter().rposition(|&b| b != 0) {
+        Some(b) => b,
+        None => {
+            v.truncate(0);
+            return ContentType::Unknown(0);
         }
-    }
+    };
+
+    let ty = ContentType::from(slice[pos]);
+    v.truncate(pos);
+    ty
 }
 
 fn make_tls13_aad(len: usize) -> ring::aead::Aad<[u8; TLS13_AAD_SIZE]> {
@@ -143,7 +147,11 @@ fn make_tls13_aad(len: usize) -> ring::aead::Aad<[u8; TLS13_AAD_SIZE]> {
 const TLS13_AAD_SIZE: usize = 1 + 2 + 2;
 
 impl MessageEncrypter for Tls13MessageEncrypter {
-    fn encrypt(&self, msg: BorrowedPlainMessage, seq: u64) -> Result<OpaqueMessage, Error> {
+    fn encrypt(
+        &self,
+        msg: BorrowedPlainMessage,
+        seq: u64,
+    ) -> Result<OpaqueMessage<'static>, Error> {
         let total_len = msg.payload.len() + 1 + self.enc_key.algorithm().tag_len();
         let mut payload = Vec::with_capacity(total_len);
         payload.extend_from_slice(msg.payload);
@@ -159,14 +167,14 @@ impl MessageEncrypter for Tls13MessageEncrypter {
         Ok(OpaqueMessage {
             typ: ContentType::ApplicationData,
             version: ProtocolVersion::TLSv1_2,
-            payload: Payload::new(payload),
+            payload: payload.into(),
         })
     }
 }
 
 impl MessageDecrypter for Tls13MessageDecrypter {
     fn decrypt(&self, mut msg: OpaqueMessage, seq: u64) -> Result<PlainMessage, Error> {
-        let payload = &mut msg.payload.0;
+        let payload = &mut msg.payload;
         if payload.len() < self.dec_key.algorithm().tag_len() {
             return Err(Error::DecryptError);
         }
@@ -175,7 +183,7 @@ impl MessageDecrypter for Tls13MessageDecrypter {
         let aad = make_tls13_aad(payload.len());
         let plain_len = self
             .dec_key
-            .open_in_place(nonce, aad, payload)
+            .open_in_place(nonce, aad, payload.as_mut())
             .map_err(|_| Error::DecryptError)?
             .len();
 
@@ -196,6 +204,6 @@ impl MessageDecrypter for Tls13MessageDecrypter {
         }
 
         msg.version = ProtocolVersion::TLSv1_3;
-        Ok(msg.into_plain_message())
+        Ok(msg.to_plain_message())
     }
 }

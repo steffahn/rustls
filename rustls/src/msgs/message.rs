@@ -72,20 +72,21 @@ impl MessagePayload {
 /// This type owns all memory for its interior parts. It is used to read/write from/to I/O
 /// buffers as well as for fragmenting, joining and encryption/decryption. It can be converted
 /// into a `Message` by decoding the payload.
-#[derive(Clone, Debug)]
-pub struct OpaqueMessage {
+#[derive(Debug)]
+pub struct OpaqueMessage<'a> {
     pub typ: ContentType,
     pub version: ProtocolVersion,
-    pub payload: Payload,
+    pub payload: Buffer<'a>,
 }
 
-impl OpaqueMessage {
+impl<'a> OpaqueMessage<'a> {
     /// `MessageError` allows callers to distinguish between valid prefixes (might
     /// become valid if we read more data) and invalid data.
-    pub fn read(r: &mut Reader) -> Result<Self, MessageError> {
-        let typ = ContentType::read(r).ok_or(MessageError::TooShortForHeader)?;
-        let version = ProtocolVersion::read(r).ok_or(MessageError::TooShortForHeader)?;
-        let len = u16::read(r).ok_or(MessageError::TooShortForHeader)?;
+    pub fn read(buf: &'a mut [u8]) -> Result<Self, MessageError> {
+        let mut r = Reader::init(&buf);
+        let typ = ContentType::read(&mut r).ok_or(MessageError::TooShortForHeader)?;
+        let version = ProtocolVersion::read(&mut r).ok_or(MessageError::TooShortForHeader)?;
+        let len = u16::read(&mut r).ok_or(MessageError::TooShortForHeader)?;
 
         // Reject undersize messages
         //  implemented per section 5.1 of RFC8446 (TLSv1.3)
@@ -112,15 +113,15 @@ impl OpaqueMessage {
             _ => {}
         };
 
-        let mut sub = r
-            .sub(len as usize)
-            .ok_or(MessageError::TooShortForLength)?;
-        let payload = Payload::read(&mut sub);
+        if r.left() < len as usize {
+            return Err(MessageError::TooShortForLength);
+        }
 
+        let end = (Self::HEADER_SIZE + len) as usize;
         Ok(Self {
             typ,
             version,
-            payload,
+            payload: Buffer::Slice(&mut buf[Self::HEADER_SIZE as usize..end]),
         })
     }
 
@@ -128,21 +129,29 @@ impl OpaqueMessage {
         let mut buf = Vec::new();
         self.typ.encode(&mut buf);
         self.version.encode(&mut buf);
-        (self.payload.0.len() as u16).encode(&mut buf);
-        self.payload.encode(&mut buf);
+        (self.payload.len() as u16).encode(&mut buf);
+        buf.extend_from_slice(self.payload.as_ref());
         buf
     }
 
-    /// Force conversion into a plaintext message.
-    ///
-    /// This should only be used for messages that are known to be in plaintext. Otherwise, the
-    /// `OpaqueMessage` should be decrypted into a `PlainMessage` using a `MessageDecrypter`.
-    pub fn into_plain_message(self) -> PlainMessage {
+    pub fn to_plain_message(&self) -> PlainMessage {
         PlainMessage {
             version: self.version,
             typ: self.typ,
-            payload: self.payload,
+            payload: Payload::new(self.payload.as_ref()),
         }
+    }
+
+    pub fn to_owned(&self) -> OpaqueMessage<'static> {
+        OpaqueMessage {
+            version: self.version,
+            typ: self.typ,
+            payload: Buffer::Vec(self.payload.as_ref().to_vec()),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        Self::HEADER_SIZE as usize + self.payload.len()
     }
 
     /// This is the maximum on-the-wire size of a TLSCiphertext.
@@ -189,11 +198,11 @@ pub struct PlainMessage {
 }
 
 impl PlainMessage {
-    pub fn into_unencrypted_opaque(self) -> OpaqueMessage {
+    pub fn into_unencrypted_opaque(self) -> OpaqueMessage<'static> {
         OpaqueMessage {
             version: self.version,
             typ: self.typ,
-            payload: self.payload,
+            payload: Buffer::Vec(self.payload.0),
         }
     }
 
@@ -275,8 +284,57 @@ impl<'a> BorrowedPlainMessage<'a> {
         OpaqueMessage {
             version: self.version,
             typ: self.typ,
-            payload: Payload(self.payload.to_vec()),
+            payload: Buffer::Vec(self.payload.to_vec()),
         }
+    }
+}
+
+/// `Cow`-like wrapper that abstracts over a mutable slice or owned `Vec` byte buffer.
+///
+/// This is used in our `OpaqueMessage`, where we would like to be able to decrypt in place.
+#[derive(Debug)]
+pub enum Buffer<'a> {
+    Slice(&'a mut [u8]),
+    Vec(Vec<u8>),
+}
+
+impl<'a> Buffer<'a> {
+    pub(crate) fn truncate(&mut self, new_len: usize) {
+        match self {
+            Buffer::Slice(slice) => *slice = &mut std::mem::take(slice)[..new_len],
+            Buffer::Vec(vec) => vec.truncate(new_len),
+        }
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        match self {
+            Buffer::Slice(slice) => slice.len(),
+            Buffer::Vec(vec) => vec.len(),
+        }
+    }
+}
+
+impl<'a> AsRef<[u8]> for Buffer<'a> {
+    fn as_ref(&self) -> &[u8] {
+        match self {
+            Buffer::Slice(slice) => slice,
+            Buffer::Vec(vec) => vec,
+        }
+    }
+}
+
+impl<'a> AsMut<[u8]> for Buffer<'a> {
+    fn as_mut(&mut self) -> &mut [u8] {
+        match self {
+            Buffer::Slice(slice) => slice,
+            Buffer::Vec(vec) => vec,
+        }
+    }
+}
+
+impl From<Vec<u8>> for Buffer<'static> {
+    fn from(vec: Vec<u8>) -> Self {
+        Buffer::Vec(vec)
     }
 }
 

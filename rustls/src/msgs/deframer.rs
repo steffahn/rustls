@@ -67,8 +67,7 @@ impl MessageDeframer {
             // Does our `buf` contain a full message?  It does if it is big enough to
             // contain a header, and that header has a length which falls within `buf`.
             // If so, deframe it and place the message onto the frames output queue.
-            let mut rd = codec::Reader::init(&self.buf[start..self.used]);
-            let m = match OpaqueMessage::read(&mut rd) {
+            let m = match OpaqueMessage::read(&mut self.buf[start..self.used]) {
                 Ok(m) => m,
                 Err(MessageError::TooShortForHeader | MessageError::TooShortForLength) => {
                     return Ok(None)
@@ -81,15 +80,16 @@ impl MessageDeframer {
 
             // If we're in the middle of joining a handshake payload and the next message is not of
             // type handshake, yield an error. Return CCS messages immediately without decrypting.
-            let end = start + rd.used();
+            let end = start + m.len();
             if m.typ == ContentType::ChangeCipherSpec && self.joining_hs.is_none() {
                 // This is unencrypted. We check the contents later.
+                let message = m.to_plain_message();
                 self.discard(end);
                 return Ok(Some(Deframed {
                     want_close_before_decrypt: false,
                     aligned: true,
                     trial_decryption_finished: false,
-                    message: m.into_plain_message(),
+                    message,
                 }));
             }
 
@@ -127,7 +127,7 @@ impl MessageDeframer {
 
             // If it's not a handshake message, just return it -- no joining necessary.
             if msg.typ != ContentType::Handshake {
-                self.discard(start + rd.used());
+                self.discard(end);
                 return Ok(Some(Deframed {
                     want_close_before_decrypt: false,
                     aligned: true,

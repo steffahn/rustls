@@ -13,7 +13,7 @@ pub trait MessageDecrypter: Send + Sync {
 
 /// Objects with this trait can encrypt TLS messages.
 pub(crate) trait MessageEncrypter: Send + Sync {
-    fn encrypt(&self, m: BorrowedPlainMessage, seq: u64) -> Result<OpaqueMessage, Error>;
+    fn encrypt(&self, m: BorrowedPlainMessage, seq: u64) -> Result<OpaqueMessage<'static>, Error>;
 }
 
 impl dyn MessageEncrypter {
@@ -86,7 +86,11 @@ pub(crate) fn make_nonce(iv: &Iv, seq: u64) -> ring::aead::Nonce {
 struct InvalidMessageEncrypter {}
 
 impl MessageEncrypter for InvalidMessageEncrypter {
-    fn encrypt(&self, _m: BorrowedPlainMessage, _seq: u64) -> Result<OpaqueMessage, Error> {
+    fn encrypt(
+        &self,
+        _m: BorrowedPlainMessage,
+        _seq: u64,
+    ) -> Result<OpaqueMessage<'static>, Error> {
         Err(Error::General("encrypt not yet available".to_string()))
     }
 }
