@@ -404,8 +404,8 @@ fn get_sample_clienthellopayload() -> ClientHelloPayload {
             ClientExtension::SignatureAlgorithms(vec![SignatureScheme::ECDSA_NISTP256_SHA256]),
             ClientExtension::make_sni(DnsNameRef::try_from_ascii_str("hello").unwrap()),
             ClientExtension::SessionTicket(ClientSessionTicket::Request),
-            ClientExtension::SessionTicket(ClientSessionTicket::Offer(Payload(vec![]))),
-            ClientExtension::Protocols(vec![PayloadU8(vec![0])]),
+            ClientExtension::SessionTicket(ClientSessionTicket::Offer(Payload(vec![].into()))),
+            ClientExtension::Protocols(vec![PayloadU8(vec![0].into())]),
             ClientExtension::SupportedVersions(vec![ProtocolVersion::TLSv1_3]),
             ClientExtension::KeyShare(vec![KeyShareEntry::new(NamedGroup::X25519, &[1, 2, 3])]),
             ClientExtension::PresharedKeyModes(vec![PSKKeyExchangeMode::PSK_DHE_KE]),
@@ -426,7 +426,7 @@ fn get_sample_clienthellopayload() -> ClientHelloPayload {
             ClientExtension::TransportParameters(vec![1, 2, 3]),
             ClientExtension::Unknown(UnknownExtension {
                 typ: ExtensionType::Unknown(12345),
-                payload: Payload(vec![1, 2, 3]),
+                payload: Payload(vec![1, 2, 3].into()),
             }),
         ],
     }
@@ -532,7 +532,7 @@ fn test_client_extension_getter(typ: ExtensionType, getter: fn(&ClientHelloPaylo
 
     chp.extensions = vec![ClientExtension::Unknown(UnknownExtension {
         typ,
-        payload: Payload(vec![]),
+        payload: Payload(vec![].into()),
     })];
     assert!(!getter(&chp));
 }
@@ -648,7 +648,7 @@ fn test_helloretry_extension_getter(typ: ExtensionType, getter: fn(&HelloRetryRe
 
     hrr.extensions = vec![HelloRetryExtension::Unknown(UnknownExtension {
         typ,
-        payload: Payload(vec![]),
+        payload: Payload(vec![].into()),
     })];
     assert!(!getter(&hrr));
 }
@@ -717,7 +717,7 @@ fn test_server_extension_getter(typ: ExtensionType, getter: fn(&ServerHelloPaylo
 
     shp.extensions = vec![ServerExtension::Unknown(UnknownExtension {
         typ,
-        payload: Payload(vec![]),
+        payload: Payload(vec![].into()),
     })];
     assert!(!getter(&shp));
 }
@@ -767,7 +767,7 @@ fn test_cert_extension_getter(typ: ExtensionType, getter: fn(&CertificateEntry) 
 
     ce.exts = vec![CertificateExtension::Unknown(UnknownExtension {
         typ,
-        payload: Payload(vec![]),
+        payload: Payload(vec![].into()),
     })];
     assert!(!getter(&ce));
 }
@@ -795,8 +795,8 @@ fn get_sample_serverhellopayload() -> ServerHelloPayload {
             ServerExtension::ECPointFormats(ECPointFormatList::supported()),
             ServerExtension::ServerNameAck,
             ServerExtension::SessionTicketAck,
-            ServerExtension::RenegotiationInfo(PayloadU8(vec![0])),
-            ServerExtension::Protocols(vec![PayloadU8(vec![0])]),
+            ServerExtension::RenegotiationInfo(PayloadU8(vec![0].into())),
+            ServerExtension::Protocols(vec![PayloadU8(vec![0].into())]),
             ServerExtension::KeyShare(KeyShareEntry::new(NamedGroup::X25519, &[1, 2, 3])),
             ServerExtension::PresharedKey(3),
             ServerExtension::ExtendedMasterSecretAck,
@@ -806,7 +806,7 @@ fn get_sample_serverhellopayload() -> ServerHelloPayload {
             ServerExtension::TransportParameters(vec![1, 2, 3]),
             ServerExtension::Unknown(UnknownExtension {
                 typ: ExtensionType::Unknown(12345),
-                payload: Payload(vec![1, 2, 3]),
+                payload: Payload(vec![1, 2, 3].into()),
             }),
         ],
     }
@@ -833,7 +833,7 @@ fn get_sample_helloretryrequest() -> HelloRetryRequest {
             HelloRetryExtension::SupportedVersions(ProtocolVersion::TLSv1_2),
             HelloRetryExtension::Unknown(UnknownExtension {
                 typ: ExtensionType::Unknown(12345),
-                payload: Payload(vec![1, 2, 3]),
+                payload: Payload(vec![1, 2, 3].into()),
             }),
         ],
     }
@@ -841,17 +841,17 @@ fn get_sample_helloretryrequest() -> HelloRetryRequest {
 
 fn get_sample_certificatepayloadtls13() -> CertificatePayloadTLS13 {
     CertificatePayloadTLS13 {
-        context: PayloadU8(vec![1, 2, 3]),
+        context: PayloadU8(vec![1, 2, 3].into()),
         entries: vec![CertificateEntry {
             cert: Certificate(vec![3, 4, 5]),
             exts: vec![
                 CertificateExtension::CertificateStatus(CertificateStatus {
-                    ocsp_response: PayloadU24(vec![1, 2, 3]),
+                    ocsp_response: PayloadU24(vec![1, 2, 3].into()),
                 }),
                 CertificateExtension::SignedCertificateTimestamp(vec![PayloadU16(vec![0])]),
                 CertificateExtension::Unknown(UnknownExtension {
                     typ: ExtensionType::Unknown(12345),
-                    payload: Payload(vec![1, 2, 3]),
+                    payload: Payload(vec![1, 2, 3].into()),
                 }),
             ],
         }],
@@ -865,14 +865,14 @@ fn get_sample_serverkeyexchangepayload_ecdhe() -> ServerKeyExchangePayload {
                 curve_type: ECCurveType::NamedCurve,
                 named_group: NamedGroup::X25519,
             },
-            public: PayloadU8(vec![1, 2, 3]),
+            public: PayloadU8(vec![1, 2, 3].into()),
         },
         dss: DigitallySignedStruct::new(SignatureScheme::RSA_PSS_SHA256, vec![1, 2, 3]),
     })
 }
 
 fn get_sample_serverkeyexchangepayload_unknown() -> ServerKeyExchangePayload {
-    ServerKeyExchangePayload::Unknown(Payload(vec![1, 2, 3]))
+    ServerKeyExchangePayload::Unknown(Payload(vec![1, 2, 3].into()))
 }
 
 fn get_sample_certificaterequestpayload() -> CertificateRequestPayload {
@@ -885,13 +885,13 @@ fn get_sample_certificaterequestpayload() -> CertificateRequestPayload {
 
 fn get_sample_certificaterequestpayloadtls13() -> CertificateRequestPayloadTLS13 {
     CertificateRequestPayloadTLS13 {
-        context: PayloadU8(vec![1, 2, 3]),
+        context: PayloadU8(vec![1, 2, 3].into()),
         extensions: vec![
             CertReqExtension::SignatureAlgorithms(vec![SignatureScheme::ECDSA_NISTP256_SHA256]),
             CertReqExtension::AuthorityNames(vec![PayloadU16(vec![1, 2, 3])]),
             CertReqExtension::Unknown(UnknownExtension {
                 typ: ExtensionType::Unknown(12345),
-                payload: Payload(vec![1, 2, 3]),
+                payload: Payload(vec![1, 2, 3].into()),
             }),
         ],
     }
@@ -908,11 +908,11 @@ fn get_sample_newsessionticketpayloadtls13() -> NewSessionTicketPayloadTLS13 {
     NewSessionTicketPayloadTLS13 {
         lifetime: 123,
         age_add: 1234,
-        nonce: PayloadU8(vec![1, 2, 3]),
+        nonce: PayloadU8(vec![1, 2, 3].into()),
         ticket: PayloadU16(vec![4, 5, 6]),
         exts: vec![NewSessionTicketExtension::Unknown(UnknownExtension {
             typ: ExtensionType::Unknown(12345),
-            payload: Payload(vec![1, 2, 3]),
+            payload: Payload(vec![1, 2, 3].into()),
         })],
     }
 }
@@ -923,7 +923,7 @@ fn get_sample_encryptedextensions() -> EncryptedExtensions {
 
 fn get_sample_certificatestatus() -> CertificateStatus {
     CertificateStatus {
-        ocsp_response: PayloadU24(vec![1, 2, 3]),
+        ocsp_response: PayloadU24(vec![1, 2, 3].into()),
     }
 }
 
@@ -971,7 +971,7 @@ fn get_all_tls12_handshake_payloads() -> Vec<HandshakeMessagePayload> {
         },
         HandshakeMessagePayload {
             typ: HandshakeType::ClientKeyExchange,
-            payload: HandshakePayload::ClientKeyExchange(Payload(vec![1, 2, 3])),
+            payload: HandshakePayload::ClientKeyExchange(Payload(vec![1, 2, 3].into())),
         },
         HandshakeMessagePayload {
             typ: HandshakeType::NewSessionTicket,
@@ -991,7 +991,7 @@ fn get_all_tls12_handshake_payloads() -> Vec<HandshakeMessagePayload> {
         },
         HandshakeMessagePayload {
             typ: HandshakeType::Finished,
-            payload: HandshakePayload::Finished(Payload(vec![1, 2, 3])),
+            payload: HandshakePayload::Finished(Payload(vec![1, 2, 3].into())),
         },
         HandshakeMessagePayload {
             typ: HandshakeType::CertificateStatus,
@@ -999,7 +999,7 @@ fn get_all_tls12_handshake_payloads() -> Vec<HandshakeMessagePayload> {
         },
         HandshakeMessagePayload {
             typ: HandshakeType::Unknown(99),
-            payload: HandshakePayload::Unknown(Payload(vec![1, 2, 3])),
+            payload: HandshakePayload::Unknown(Payload(vec![1, 2, 3].into())),
         },
     ]
 }
@@ -1108,7 +1108,7 @@ fn get_all_tls13_handshake_payloads() -> Vec<HandshakeMessagePayload> {
         },
         HandshakeMessagePayload {
             typ: HandshakeType::ClientKeyExchange,
-            payload: HandshakePayload::ClientKeyExchange(Payload(vec![1, 2, 3])),
+            payload: HandshakePayload::ClientKeyExchange(Payload(vec![1, 2, 3].into())),
         },
         HandshakeMessagePayload {
             typ: HandshakeType::NewSessionTicket,
@@ -1130,7 +1130,7 @@ fn get_all_tls13_handshake_payloads() -> Vec<HandshakeMessagePayload> {
         },
         HandshakeMessagePayload {
             typ: HandshakeType::Finished,
-            payload: HandshakePayload::Finished(Payload(vec![1, 2, 3])),
+            payload: HandshakePayload::Finished(Payload(vec![1, 2, 3].into())),
         },
         HandshakeMessagePayload {
             typ: HandshakeType::CertificateStatus,
@@ -1138,7 +1138,7 @@ fn get_all_tls13_handshake_payloads() -> Vec<HandshakeMessagePayload> {
         },
         HandshakeMessagePayload {
             typ: HandshakeType::Unknown(99),
-            payload: HandshakePayload::Unknown(Payload(vec![1, 2, 3])),
+            payload: HandshakePayload::Unknown(Payload(vec![1, 2, 3].into())),
         },
     ]
 }

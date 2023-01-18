@@ -569,7 +569,7 @@ impl State<ClientConnectionData> for ExpectCertificateRequest {
                 .as_ref(),
             certreq.get_authorities_extension(),
             &compat_sigschemes,
-            Some(certreq.context.0.clone()),
+            Some(certreq.context.0.as_ref().to_owned()),
         );
 
         Ok(Box::new(ExpectCertificate {

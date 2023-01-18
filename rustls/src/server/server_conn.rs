@@ -174,7 +174,7 @@ impl<'a> ClientHello<'a> {
         self.alpn.map(|protocols| {
             protocols
                 .iter()
-                .map(|proto| proto.0.as_slice())
+                .map(|proto| proto.0.as_ref())
         })
     }
 
@@ -725,7 +725,7 @@ impl EarlyDataState {
         let available = bytes.0.len();
         match self {
             Self::Accepted(ref mut received) if received.apply_limit(available) == available => {
-                received.append(bytes.0);
+                received.append(bytes.0.into_owned());
                 true
             }
             _ => false,

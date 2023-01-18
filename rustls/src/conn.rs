@@ -397,7 +397,7 @@ fn is_valid_ccs(msg: &PlainMessage) -> bool {
     // We passthrough ChangeCipherSpec messages in the deframer without decrypting them.
     // nb. this is prior to the record layer, so is unencrypted. see
     // third paragraph of section 5 in RFC8446.
-    msg.typ == ContentType::ChangeCipherSpec && msg.payload.0 == [0x01]
+    msg.typ == ContentType::ChangeCipherSpec && msg.payload.0.as_ref() == [0x01]
 }
 
 enum Limit {
@@ -1209,7 +1209,8 @@ impl CommonState {
     }
 
     pub(crate) fn take_received_plaintext(&mut self, bytes: Payload) {
-        self.received_plaintext.append(bytes.0);
+        self.received_plaintext
+            .append(bytes.0.into_owned());
     }
 
     #[cfg(feature = "tls12")]

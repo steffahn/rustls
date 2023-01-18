@@ -338,7 +338,7 @@ impl ClientSessionCommon {
     ) -> Self {
         Self {
             ticket: PayloadU16(ticket),
-            secret: PayloadU8(secret),
+            secret: PayloadU8::new(secret),
             epoch: time_now.as_secs(),
             lifetime_secs: cmp::min(lifetime_secs, MAX_TICKET_LIFETIME),
             server_cert_chain,

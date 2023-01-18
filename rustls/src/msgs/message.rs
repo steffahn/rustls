@@ -22,7 +22,7 @@ impl MessagePayload {
     pub fn encode(&self, bytes: &mut Vec<u8>) {
         match self {
             Self::Alert(x) => x.encode(bytes),
-            Self::Handshake { encoded, .. } => bytes.extend(&encoded.0),
+            Self::Handshake { encoded, .. } => bytes.extend(encoded.0.as_ref()),
             Self::ChangeCipherSpec(x) => x.encode(bytes),
             Self::ApplicationData(x) => x.encode(bytes),
         }
@@ -170,18 +170,18 @@ impl From<Message> for PlainMessage {
     fn from(msg: Message) -> Self {
         let typ = msg.payload.content_type();
         let payload = match msg.payload {
-            MessagePayload::ApplicationData(payload) => payload,
+            MessagePayload::ApplicationData(payload) => payload.0.into_owned(),
             _ => {
                 let mut buf = Vec::new();
                 msg.payload.encode(&mut buf);
-                Payload(buf)
+                buf
             }
         };
 
         Self {
             typ,
             version: msg.version,
-            payload,
+            payload: Payload::new(payload),
         }
     }
 }
@@ -202,7 +202,7 @@ impl PlainMessage {
         OpaqueMessage {
             version: self.version,
             typ: self.typ,
-            payload: Buffer::Vec(self.payload.0),
+            payload: Buffer::Vec(self.payload.0.into_owned()),
         }
     }
 

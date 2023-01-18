@@ -3,9 +3,11 @@ use std::fmt;
 use crate::msgs::codec;
 use crate::msgs::codec::{Codec, Reader};
 
+use std::borrow::Cow;
+
 /// An externally length'd payload
 #[derive(Clone, Eq, PartialEq)]
-pub struct Payload(pub Vec<u8>);
+pub struct Payload(pub Cow<'static, [u8]>);
 
 impl Codec for Payload {
     fn encode(&self, bytes: &mut Vec<u8>) {
@@ -19,7 +21,7 @@ impl Codec for Payload {
 
 impl Payload {
     pub fn new(bytes: impl Into<Vec<u8>>) -> Self {
-        Self(bytes.into())
+        Self(bytes.into().into())
     }
 
     pub fn empty() -> Self {
@@ -27,23 +29,23 @@ impl Payload {
     }
 
     pub fn read(r: &mut Reader) -> Self {
-        Self(r.rest().to_vec())
+        Self::new(r.rest().to_vec())
     }
 }
 
 impl fmt::Debug for Payload {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        hex(f, &self.0)
+        hex(f, self.0.as_ref())
     }
 }
 
 /// An arbitrary, unknown-content, u24-length-prefixed payload
 #[derive(Clone, Eq, PartialEq)]
-pub struct PayloadU24(pub Vec<u8>);
+pub struct PayloadU24(pub Cow<'static, [u8]>);
 
 impl PayloadU24 {
     pub fn new(bytes: Vec<u8>) -> Self {
-        Self(bytes)
+        Self(bytes.into())
     }
 }
 
@@ -56,14 +58,13 @@ impl Codec for PayloadU24 {
     fn read(r: &mut Reader) -> Option<Self> {
         let len = codec::u24::read(r)?.0 as usize;
         let mut sub = r.sub(len)?;
-        let body = sub.rest().to_vec();
-        Some(Self(body))
+        Some(Self::new(sub.rest().to_vec()))
     }
 }
 
 impl fmt::Debug for PayloadU24 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        hex(f, &self.0)
+        hex(f, self.0.as_ref())
     }
 }
 
@@ -107,19 +108,19 @@ impl fmt::Debug for PayloadU16 {
 
 /// An arbitrary, unknown-content, u8-length-prefixed payload
 #[derive(Clone, Eq, PartialEq)]
-pub struct PayloadU8(pub Vec<u8>);
+pub struct PayloadU8(pub Cow<'static, [u8]>);
 
 impl PayloadU8 {
     pub fn new(bytes: Vec<u8>) -> Self {
-        Self(bytes)
+        Self(bytes.into())
     }
 
     pub fn empty() -> Self {
-        Self(Vec::new())
+        Self::new(Vec::new())
     }
 
     pub fn into_inner(self) -> Vec<u8> {
-        self.0
+        self.0.into_owned()
     }
 }
 
@@ -133,13 +134,13 @@ impl Codec for PayloadU8 {
         let len = u8::read(r)? as usize;
         let mut sub = r.sub(len)?;
         let body = sub.rest().to_vec();
-        Some(Self(body))
+        Some(Self::new(body))
     }
 }
 
 impl fmt::Debug for PayloadU8 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        hex(f, &self.0)
+        hex(f, self.0.as_ref())
     }
 }
 
