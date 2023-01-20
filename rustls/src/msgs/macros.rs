@@ -21,7 +21,7 @@ macro_rules! enum_builder {
                 }
             }
         }
-        impl Codec for $enum_name {
+        impl<'a> Codec<'a> for $enum_name {
             fn encode(&self, bytes: &mut Vec<u8>) {
                 self.get_u8().encode(bytes);
             }
@@ -67,7 +67,7 @@ macro_rules! enum_builder {
                 }
             }
         }
-        impl Codec for $enum_name {
+        impl<'a> Codec<'a> for $enum_name {
             fn encode(&self, bytes: &mut Vec<u8>) {
                 self.get_u16().encode(bytes);
             }

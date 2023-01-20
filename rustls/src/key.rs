@@ -25,7 +25,7 @@ pub struct PrivateKey(pub Vec<u8>);
 #[derive(Clone, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct Certificate(pub Vec<u8>);
 
-impl Codec for Certificate {
+impl<'a> Codec<'a> for Certificate {
     fn encode(&self, bytes: &mut Vec<u8>) {
         codec::u24(self.0.len() as u32).encode(bytes);
         bytes.extend_from_slice(&self.0);

@@ -494,9 +494,9 @@ fn join_randoms(first: &[u8; 32], second: &[u8; 32]) -> [u8; 64] {
 
 type MessageCipherPair = (Box<dyn MessageDecrypter>, Box<dyn MessageEncrypter>);
 
-pub(crate) fn decode_ecdh_params<T: Codec>(
+pub(crate) fn decode_ecdh_params<'a, T: Codec<'a>>(
     common: &mut CommonState,
-    kx_params: &[u8],
+    kx_params: &'a [u8],
 ) -> Result<T, Error> {
     decode_ecdh_params_::<T>(kx_params).ok_or_else(|| {
         common.send_fatal_alert(AlertDescription::DecodeError);
@@ -504,7 +504,7 @@ pub(crate) fn decode_ecdh_params<T: Codec>(
     })
 }
 
-fn decode_ecdh_params_<T: Codec>(kx_params: &[u8]) -> Option<T> {
+fn decode_ecdh_params_<'a, T: Codec<'a>>(kx_params: &'a [u8]) -> Option<T> {
     let mut rd = Reader::init(kx_params);
     let ecdh_params = T::read(&mut rd)?;
     match rd.any_left() {

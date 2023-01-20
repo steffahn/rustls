@@ -9,7 +9,7 @@ use std::borrow::Cow;
 #[derive(Clone, Eq, PartialEq)]
 pub struct Payload(pub Cow<'static, [u8]>);
 
-impl Codec for Payload {
+impl<'a> Codec<'a> for Payload {
     fn encode(&self, bytes: &mut Vec<u8>) {
         bytes.extend_from_slice(&self.0);
     }
@@ -49,7 +49,7 @@ impl PayloadU24 {
     }
 }
 
-impl Codec for PayloadU24 {
+impl<'a> Codec<'a> for PayloadU24 {
     fn encode(&self, bytes: &mut Vec<u8>) {
         codec::u24(self.0.len() as u32).encode(bytes);
         bytes.extend_from_slice(&self.0);
@@ -87,7 +87,7 @@ impl PayloadU16 {
     }
 }
 
-impl Codec for PayloadU16 {
+impl<'a> Codec<'a> for PayloadU16 {
     fn encode(&self, bytes: &mut Vec<u8>) {
         Self::encode_slice(&self.0, bytes);
     }
@@ -124,7 +124,7 @@ impl PayloadU8 {
     }
 }
 
-impl Codec for PayloadU8 {
+impl<'a> Codec<'a> for PayloadU8 {
     fn encode(&self, bytes: &mut Vec<u8>) {
         (self.0.len() as u8).encode(bytes);
         bytes.extend_from_slice(&self.0);

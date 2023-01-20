@@ -26,7 +26,7 @@ pub struct ClientSessionKey {
     name: Vec<u8>,
 }
 
-impl Codec for ClientSessionKey {
+impl<'a> Codec<'a> for ClientSessionKey {
     fn encode(&self, bytes: &mut Vec<u8>) {
         bytes.extend_from_slice(self.kind);
         bytes.extend_from_slice(&self.name);
@@ -413,7 +413,7 @@ pub struct ServerSessionValue {
     freshness: Option<bool>,
 }
 
-impl Codec for ServerSessionValue {
+impl<'a> Codec<'a> for ServerSessionValue {
     fn encode(&self, bytes: &mut Vec<u8>) {
         if let Some(ref sni) = self.sni {
             1u8.encode(bytes);
