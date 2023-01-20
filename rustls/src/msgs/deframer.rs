@@ -151,7 +151,9 @@ impl MessageDeframer {
         let message = PlainMessage {
             typ: ContentType::Handshake,
             version: meta.version,
-            payload: Payload::new(&self.buf[meta.payload.start..meta.payload.start + expected_len]),
+            payload: Payload::new(
+                self.buf[meta.payload.start..meta.payload.start + expected_len].to_vec(),
+            ),
         };
 
         // But before we return, update the `joining_hs` state to skip past this payload.

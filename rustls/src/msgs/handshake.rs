@@ -176,7 +176,7 @@ impl SessionID {
 #[derive(Clone, Debug)]
 pub struct UnknownExtension {
     pub typ: ExtensionType,
-    pub payload: Payload,
+    pub payload: Payload<'static>,
 }
 
 impl UnknownExtension {
@@ -185,7 +185,7 @@ impl UnknownExtension {
     }
 
     fn read(typ: ExtensionType, r: &mut Reader) -> Self {
-        let payload = Payload::read(r);
+        let payload = Payload::read(r).to_owned();
         Self { typ, payload }
     }
 }
@@ -249,7 +249,7 @@ impl DecomposedSignatureScheme for SignatureScheme {
 pub enum ServerNamePayload {
     // Stored twice, bytes so we can round-trip, and DnsName for use
     HostName((PayloadU16, webpki::DnsName)),
-    Unknown(Payload),
+    Unknown(Payload<'static>),
 }
 
 impl ServerNamePayload {
@@ -301,7 +301,7 @@ impl<'a> Codec<'a> for ServerName {
 
         let payload = match typ {
             ServerNameType::HostName => ServerNamePayload::read_hostname(r)?,
-            _ => ServerNamePayload::Unknown(Payload::read(r)),
+            _ => ServerNamePayload::Unknown(Payload::read(r).to_owned()),
         };
 
         Some(Self { typ, payload })
@@ -499,7 +499,7 @@ impl<'a> Codec<'a> for OCSPCertificateStatusRequest {
 #[derive(Clone, Debug)]
 pub enum CertificateStatusRequest {
     OCSP(OCSPCertificateStatusRequest),
-    Unknown((CertificateStatusType, Payload)),
+    Unknown((CertificateStatusType, Payload<'static>)),
 }
 
 impl<'a> Codec<'a> for CertificateStatusRequest {
@@ -522,7 +522,7 @@ impl<'a> Codec<'a> for CertificateStatusRequest {
                 Some(Self::OCSP(ocsp_req))
             }
             _ => {
-                let data = Payload::read(r);
+                let data = Payload::read(r).to_owned();
                 Some(Self::Unknown((typ, data)))
             }
         }
@@ -646,7 +646,7 @@ impl<'a> Codec<'a> for ClientExtension {
             ExtensionType::ServerName => Self::ServerName(ServerNameRequest::read(&mut sub)?),
             ExtensionType::SessionTicket => {
                 if sub.any_left() {
-                    let contents = Payload::read(&mut sub);
+                    let contents = Payload::read(&mut sub).to_owned();
                     Self::SessionTicket(ClientSessionTicket::Offer(contents))
                 } else {
                     Self::SessionTicket(ClientSessionTicket::Request)
@@ -718,7 +718,7 @@ impl ClientExtension {
 #[derive(Clone, Debug)]
 pub enum ClientSessionTicket {
     Request,
-    Offer(Payload),
+    Offer(Payload<'static>),
 }
 
 #[derive(Clone, Debug)]
@@ -1705,7 +1705,7 @@ impl<'a> Codec<'a> for ECDHEServerKeyExchange {
 #[derive(Debug)]
 pub enum ServerKeyExchangePayload {
     ECDHE(ECDHEServerKeyExchange),
-    Unknown(Payload),
+    Unknown(Payload<'static>),
 }
 
 impl<'a> Codec<'a> for ServerKeyExchangePayload {
@@ -1719,7 +1719,7 @@ impl<'a> Codec<'a> for ServerKeyExchangePayload {
     fn read(r: &mut Reader) -> Option<Self> {
         // read as Unknown, fully parse when we know the
         // KeyExchangeAlgorithm
-        Some(Self::Unknown(Payload::read(r)))
+        Some(Self::Unknown(Payload::read(r).to_owned()))
     }
 }
 
@@ -2171,15 +2171,15 @@ pub enum HandshakePayload {
     CertificateVerify(DigitallySignedStruct),
     ServerHelloDone,
     EndOfEarlyData,
-    ClientKeyExchange(Payload),
+    ClientKeyExchange(Payload<'static>),
     NewSessionTicket(NewSessionTicketPayload),
     NewSessionTicketTLS13(NewSessionTicketPayloadTLS13),
     EncryptedExtensions(EncryptedExtensions),
     KeyUpdate(KeyUpdateRequest),
-    Finished(Payload),
+    Finished(Payload<'static>),
     CertificateStatus(CertificateStatus),
-    MessageHash(Payload),
-    Unknown(Payload),
+    MessageHash(Payload<'static>),
+    Unknown(Payload<'static>),
 }
 
 impl HandshakePayload {
@@ -2281,7 +2281,7 @@ impl HandshakeMessagePayload {
                 HandshakePayload::ServerHelloDone
             }
             HandshakeType::ClientKeyExchange => {
-                HandshakePayload::ClientKeyExchange(Payload::read(&mut sub))
+                HandshakePayload::ClientKeyExchange(Payload::read(&mut sub).to_owned())
             }
             HandshakeType::CertificateRequest if vers == ProtocolVersion::TLSv1_3 => {
                 let p = CertificateRequestPayloadTLS13::read(&mut sub)?;
@@ -2314,7 +2314,9 @@ impl HandshakeMessagePayload {
                 }
                 HandshakePayload::EndOfEarlyData
             }
-            HandshakeType::Finished => HandshakePayload::Finished(Payload::read(&mut sub)),
+            HandshakeType::Finished => {
+                HandshakePayload::Finished(Payload::read(&mut sub).to_owned())
+            }
             HandshakeType::CertificateStatus => {
                 HandshakePayload::CertificateStatus(CertificateStatus::read(&mut sub)?)
             }
@@ -2326,7 +2328,7 @@ impl HandshakeMessagePayload {
                 // not legal on wire
                 return None;
             }
-            _ => HandshakePayload::Unknown(Payload::read(&mut sub)),
+            _ => HandshakePayload::Unknown(Payload::read(&mut sub).to_owned()),
         };
 
         if sub.any_left() {

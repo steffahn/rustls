@@ -197,7 +197,7 @@ impl<'a> Codec<'a> for u64 {
         bytes.extend_from_slice(&b64);
     }
 
-    fn read(r: &mut Reader) -> Option<Self> {
+    fn read(r: &mut Reader<'a>) -> Option<Self> {
         r.take(8).and_then(decode_u64)
     }
 }

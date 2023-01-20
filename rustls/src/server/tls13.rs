@@ -810,7 +810,7 @@ mod client_hello {
     ) -> KeyScheduleTrafficWithClientFinishedPending {
         let handshake_hash = transcript.get_current_hash();
         let verify_data = key_schedule.sign_server_finish(&handshake_hash);
-        let verify_data_payload = Payload::new(verify_data.as_ref());
+        let verify_data_payload = Payload::new(verify_data.as_ref().to_vec());
 
         let m = Message {
             version: ProtocolVersion::TLSv1_3,

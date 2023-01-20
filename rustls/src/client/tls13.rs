@@ -787,7 +787,7 @@ fn emit_finished_tls13(
     verify_data: ring::hmac::Tag,
     common: &mut CommonState,
 ) {
-    let verify_data_payload = Payload::new(verify_data.as_ref());
+    let verify_data_payload = Payload::new(verify_data.as_ref().to_vec());
 
     let m = Message {
         version: ProtocolVersion::TLSv1_3,

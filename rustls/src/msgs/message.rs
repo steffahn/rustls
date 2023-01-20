@@ -12,10 +12,10 @@ pub enum MessagePayload {
     Alert(AlertMessagePayload),
     Handshake {
         parsed: HandshakeMessagePayload,
-        encoded: Payload,
+        encoded: Payload<'static>,
     },
     ChangeCipherSpec(ChangeCipherSpecPayload),
-    ApplicationData(Payload),
+    ApplicationData(Payload<'static>),
 }
 
 impl MessagePayload {
@@ -35,7 +35,11 @@ impl MessagePayload {
         }
     }
 
-    pub fn new(typ: ContentType, vers: ProtocolVersion, payload: Payload) -> Result<Self, Error> {
+    pub fn new(
+        typ: ContentType,
+        vers: ProtocolVersion,
+        payload: Payload<'static>,
+    ) -> Result<Self, Error> {
         let mut r = Reader::init(&payload.0);
         let parsed = match typ {
             ContentType::ApplicationData => return Ok(Self::ApplicationData(payload)),
@@ -138,7 +142,7 @@ impl<'a> OpaqueMessage<'a> {
         PlainMessage {
             version: self.version,
             typ: self.typ,
-            payload: Payload::new(self.payload.as_ref()),
+            payload: Payload::new(self.payload.as_ref().to_vec()),
         }
     }
 
@@ -194,7 +198,7 @@ impl From<Message> for PlainMessage {
 pub struct PlainMessage {
     pub typ: ContentType,
     pub version: ProtocolVersion,
-    pub payload: Payload,
+    pub payload: Payload<'static>,
 }
 
 impl PlainMessage {

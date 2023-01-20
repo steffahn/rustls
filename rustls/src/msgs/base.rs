@@ -7,33 +7,37 @@ use std::borrow::Cow;
 
 /// An externally length'd payload
 #[derive(Clone, Eq, PartialEq)]
-pub struct Payload(pub Cow<'static, [u8]>);
+pub struct Payload<'a>(pub Cow<'a, [u8]>);
 
-impl<'a> Codec<'a> for Payload {
+impl<'a> Codec<'a> for Payload<'a> {
     fn encode(&self, bytes: &mut Vec<u8>) {
         bytes.extend_from_slice(&self.0);
     }
 
-    fn read(r: &mut Reader) -> Option<Self> {
+    fn read(r: &mut Reader<'a>) -> Option<Payload<'a>> {
         Some(Self::read(r))
     }
 }
 
-impl Payload {
-    pub fn new(bytes: impl Into<Vec<u8>>) -> Self {
-        Self(bytes.into().into())
+impl<'a> Payload<'a> {
+    pub fn new(bytes: impl Into<Cow<'a, [u8]>>) -> Self {
+        Self(bytes.into())
     }
 
-    pub fn empty() -> Self {
-        Self::new(Vec::new())
+    pub fn empty() -> Payload<'static> {
+        Payload::new(Vec::new())
     }
 
-    pub fn read(r: &mut Reader) -> Self {
-        Self::new(r.rest().to_vec())
+    pub fn read(r: &mut Reader<'a>) -> Self {
+        Self::new(r.rest())
+    }
+
+    pub fn to_owned(&self) -> Payload<'static> {
+        Payload::new(self.0.to_vec())
     }
 }
 
-impl fmt::Debug for Payload {
+impl<'a> fmt::Debug for Payload<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         hex(f, self.0.as_ref())
     }
