@@ -138,10 +138,54 @@ impl MessageDeframer {
 
             // If we don't know the payload size yet or if the payload size is larger
             // than the currently buffered payload, we need to wait for more data.
-            match self.append_hs(msg.version, &msg.payload.0, end, false)? {
-                HandshakePayloadState::Blocked => return Ok(None),
-                HandshakePayloadState::Complete(len) => break len,
-                HandshakePayloadState::Continue => continue,
+            let meta = match &mut self.joining_hs {
+                Some(meta) => {
+                    debug_assert_eq!(meta.quic, false);
+
+                    // We're joining a handshake message to the previous one here.
+                    // Write it into the buffer and update the metadata.
+
+                    let dst =
+                        &mut self.buf[meta.payload.end..meta.payload.end + msg.payload.0.len()];
+                    dst.copy_from_slice(msg.payload.0.as_ref());
+                    meta.message.end = end;
+                    meta.payload.end += msg.payload.0.len();
+
+                    // If we haven't parsed the payload size yet, try to do so now.
+                    if meta.expected_len.is_none() {
+                        meta.expected_len =
+                            payload_size(&self.buf[meta.payload.start..meta.payload.end])?;
+                    }
+
+                    meta
+                }
+                None => {
+                    // We've found a new handshake message here.
+                    // Write it into the buffer and create the metadata.
+
+                    let expected_len = payload_size(msg.payload.0.as_ref())?;
+                    let dst = &mut self.buf[..msg.payload.0.len()];
+                    dst.copy_from_slice(msg.payload.0.as_ref());
+                    self.joining_hs
+                        .insert(HandshakePayloadMeta {
+                            message: Range { start: 0, end },
+                            payload: Range {
+                                start: 0,
+                                end: msg.payload.0.len(),
+                            },
+                            version: msg.version,
+                            expected_len,
+                            quic: false,
+                        })
+                }
+            };
+
+            match meta.expected_len {
+                Some(len) if len <= meta.payload.len() => break len,
+                _ => match self.used > meta.message.end {
+                    true => continue,
+                    false => return Ok(None),
+                },
             }
         };
 
@@ -191,24 +235,9 @@ impl MessageDeframer {
         }
 
         let end = self.used + payload.len();
-        self.append_hs(version, payload, end, true)?;
-        self.used = end;
-        Ok(())
-    }
-
-    /// Write the handshake message contents into the buffer and update the metadata.
-    ///
-    /// Returns true if a complete message is found.
-    fn append_hs(
-        &mut self,
-        version: ProtocolVersion,
-        payload: &[u8],
-        end: usize,
-        quic: bool,
-    ) -> Result<HandshakePayloadState, Error> {
-        let meta = match &mut self.joining_hs {
+        match &mut self.joining_hs {
             Some(meta) => {
-                debug_assert_eq!(meta.quic, quic);
+                debug_assert_eq!(meta.quic, true);
 
                 // We're joining a handshake message to the previous one here.
                 // Write it into the buffer and update the metadata.
@@ -242,18 +271,13 @@ impl MessageDeframer {
                         },
                         version,
                         expected_len,
-                        quic,
+                        quic: true,
                     })
             }
         };
 
-        Ok(match meta.expected_len {
-            Some(len) if len <= meta.payload.len() => HandshakePayloadState::Complete(len),
-            _ => match self.used > meta.message.end {
-                true => HandshakePayloadState::Continue,
-                false => HandshakePayloadState::Blocked,
-            },
-        })
+        self.used = end;
+        Ok(())
     }
 
     /// Read some bytes from `rd`, and add them to our internal buffer.
@@ -335,15 +359,6 @@ impl MessageDeframer {
             self.used = 0;
         }
     }
-}
-
-enum HandshakePayloadState {
-    /// Waiting for more data.
-    Blocked,
-    /// We have a complete handshake message.
-    Complete(usize),
-    /// More records available for processing.
-    Continue,
 }
 
 struct HandshakePayloadMeta {
