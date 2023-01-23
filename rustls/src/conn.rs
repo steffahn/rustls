@@ -534,26 +534,25 @@ impl<Data> ConnectionCommon<Data> {
     /// This is a shortcut to the `process_new_packets()` -> `process_msg()` ->
     /// `process_handshake_messages()` path, specialized for the first handshake message.
     pub(crate) fn first_handshake_message(&mut self) -> Result<Option<Message>, Error> {
-        let result = self
-            .message_deframer
-            .pop(&mut self.common_state.record_layer);
-
-        match self.common_state.deframed(result) {
-            Ok(Some(msg)) => match Message::try_from(msg) {
-                Ok(msg) => Ok(Some(msg)),
-                Err(err) => {
-                    self.common_state
-                        .send_fatal_alert(AlertDescription::DecodeError);
-                    self.state = Err(err.clone());
-                    Err(err)
+        self.message_deframer
+            .pop(&mut self.common_state.record_layer, |result| {
+                match self.common_state.deframed(result) {
+                    Ok(Some(msg)) => match Message::try_from(msg) {
+                        Ok(msg) => Ok(Some(msg)),
+                        Err(err) => {
+                            self.common_state
+                                .send_fatal_alert(AlertDescription::DecodeError);
+                            self.state = Err(err.clone());
+                            Err(err)
+                        }
+                    },
+                    Ok(None) => Ok(None),
+                    Err(err) => {
+                        self.state = Err(err.clone());
+                        return Err(err);
+                    }
                 }
-            },
-            Ok(None) => Ok(None),
-            Err(err) => {
-                self.state = Err(err.clone());
-                return Err(err);
-            }
-        }
+            })
     }
 
     pub(crate) fn replace_state(&mut self, new: Box<dyn State<Data>>) {
@@ -588,27 +587,38 @@ impl<Data> ConnectionCommon<Data> {
         };
 
         loop {
-            let result = self
-                .message_deframer
-                .pop(&mut self.common_state.record_layer);
-            let msg = match self.common_state.deframed(result) {
-                Ok(Some(msg)) => msg,
-                Ok(None) => break,
-                Err(e) => {
-                    self.state = Err(e.clone());
-                    return Err(e);
-                }
-            };
-
+            enum E<T> {
+                Return(T),
+                Break,
+                Unit,
+            }
             match self
-                .common_state
-                .process_message(msg, state, &mut self.data)
-            {
-                Ok(new) => state = new,
-                Err(e) => {
-                    self.state = Err(e.clone());
-                    return Err(e);
-                }
+                .message_deframer
+                .pop(&mut self.common_state.record_layer, |result| {
+                    let msg = match self.common_state.deframed(result) {
+                        Ok(Some(msg)) => msg,
+                        Ok(None) => return E::Break,
+                        Err(e) => {
+                            self.state = Err(e.clone());
+                            return E::Return(Err(e));
+                        }
+                    };
+
+                    match self
+                        .common_state
+                        .process_message(msg, state, &mut self.data)
+                    {
+                        Ok(new) => state = new,
+                        Err(e) => {
+                            self.state = Err(e.clone());
+                            return E::Return(Err(e));
+                        }
+                    };
+                    E::Unit
+                }) {
+                E::Return(r) => return r,
+                E::Break => break,
+                E::Unit => (),
             }
         }
 
