@@ -41,14 +41,16 @@ impl MessageDeframer {
     /// Returns an `Error` if the deframer failed to parse some message contents or if decryption
     /// failed, `Ok(None)` if no full message is buffered or if trial decryption failed, and
     /// `Ok(Some(_))` if a valid message was found and decrypted successfully.
-    pub fn pop<R>(
+    pub fn pop<RLHolder, R>(
         &mut self,
-        record_layer: &mut RecordLayer,
-        continuation: impl FnOnce(Result<Option<Deframed<'_>>, Error>) -> R,
+        record_layer_holder: &mut RLHolder,
+        record_layer_access: impl FnOnce(&mut RLHolder) -> &mut RecordLayer,
+        continuation: impl FnOnce(&mut RLHolder, Result<Option<Deframed<'_>>, Error>) -> R,
     ) -> R {
+        let record_layer = record_layer_access(record_layer_holder);
         macro_rules! return_ {
             ($e:expr) => {{
-                return continuation($e);
+                return continuation(record_layer_holder, $e);
             }};
         }
 
@@ -240,7 +242,7 @@ impl MessageDeframer {
             self.discard = end;
         }
 
-        continuation(Ok(Some(Deframed {
+        continuation(record_layer_holder, Ok(Some(Deframed {
             want_close_before_decrypt: false,
             aligned: self.joining_hs.is_none(),
             trial_decryption_finished: true,
