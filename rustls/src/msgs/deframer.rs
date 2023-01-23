@@ -1,6 +1,8 @@
 use std::io;
 use std::ops::Range;
 
+use polonius_the_crab::{polonius, polonius_return, exit_polonius};
+
 use super::base::Payload;
 use super::enums::ContentType;
 use super::message::PlainMessage;
@@ -51,6 +53,8 @@ impl MessageDeframer {
             return Ok(None);
         }
 
+        let mut buf = &mut self.buf;
+
         // We loop over records we've received but not processed yet.
         // For records that decrypt as `Handshake`, we keep the current state of the joined
         // handshake message payload in `self.joining_hs`, appending to it as we see records.
@@ -69,20 +73,26 @@ impl MessageDeframer {
                 None => 0,
             };
 
+            enum E<T> {
+                Value(T),
+                Continue,
+            }
+            let E::Value((end, payload, version)) = polonius!(|buf| -> Result<Option<Deframed<'polonius>>, Error> {
+
             // Does our `buf` contain a full message?  It does if it is big enough to
             // contain a header, and that header has a length which falls within `buf`.
             // If so, deframe it and place the message onto the frames output queue.
-            let m = match BorrowedOpaqueMessage::read(&mut self.buf[start..self.used]) {
+            let m = match BorrowedOpaqueMessage::read(&mut buf[start..self.used]) {
                 Ok((m, rest)) => {
                     drop(rest);
                     m
                 }
                 Err(MessageError::TooShortForHeader | MessageError::TooShortForLength) => {
-                    return Ok(None)
+                    polonius_return!(Ok(None))
                 }
                 Err(_) => {
                     self.desynced = true;
-                    return Err(Error::CorruptMessage);
+                    polonius_return!(Err(Error::CorruptMessage));
                 }
             };
 
@@ -93,12 +103,12 @@ impl MessageDeframer {
                 // This is unencrypted. We check the contents later.
                 let message = m.into_plain_message();
                 self.discard = end;
-                return Ok(Some(Deframed {
+                polonius_return!(Ok(Some(Deframed {
                     want_close_before_decrypt: false,
                     aligned: true,
                     trial_decryption_finished: false,
                     message,
-                }));
+                })));
             }
 
             // Decrypt the encrypted message (if necessary).
@@ -115,13 +125,13 @@ impl MessageDeframer {
                 // payload in progress, this counts as interleaved, so we error out.
                 Ok(None) if self.joining_hs.is_some() => {
                     self.desynced = true;
-                    return Err(Error::PeerMisbehavedError(INTERLEAVED_ERROR.into()));
+                    polonius_return!(Err(Error::PeerMisbehavedError(INTERLEAVED_ERROR.into())));
                 }
                 Ok(None) => {
                     self.discard = end;
-                    continue;
+                    exit_polonius!(E::Continue);
                 }
-                Err(e) => return Err(e),
+                Err(e) => polonius_return!(Err(e)),
             };
 
             if self.joining_hs.is_some() && msg.typ != ContentType::Handshake {
@@ -130,18 +140,18 @@ impl MessageDeframer {
                 // records, there MUST NOT be any other records between them."
                 // https://www.rfc-editor.org/rfc/rfc8446#section-5.1
                 self.desynced = true;
-                return Err(Error::PeerMisbehavedError(INTERLEAVED_ERROR.into()));
+                polonius_return!(Err(Error::PeerMisbehavedError(INTERLEAVED_ERROR.into())));
             }
 
             // If it's not a handshake message, just return it -- no joining necessary.
             if msg.typ != ContentType::Handshake {
                 self.discard = end;
-                return Ok(Some(Deframed {
+                polonius_return!(Ok(Some(Deframed {
                     want_close_before_decrypt: false,
                     aligned: true,
                     trial_decryption_finished: false,
                     message: msg,
-                }));
+                })));
             }
 
             // If we don't know the payload size yet or if the payload size is larger
@@ -150,7 +160,11 @@ impl MessageDeframer {
             let payload_start = start + (BorrowedOpaqueMessage::HEADER_SIZE as usize);
             let payload = payload_start..(payload_start + msg.payload.0.len());
             let version = msg.version;
-            drop(msg);
+
+            E::Value((end, payload, version))
+            }) else { continue };
+
+            let payload = || payload.clone();
 
             let meta = match &mut self.joining_hs {
                 Some(meta) => {
@@ -159,15 +173,15 @@ impl MessageDeframer {
                     // We're joining a handshake message to the previous one here.
                     // Write it into the buffer and update the metadata.
 
-                    self.buf
-                        .copy_within(payload, meta.payload.end);
+                    buf
+                        .copy_within(payload(), meta.payload.end);
                     meta.message.end = end;
-                    meta.payload.end += payload.len();
+                    meta.payload.end += payload().len();
 
                     // If we haven't parsed the payload size yet, try to do so now.
                     if meta.expected_len.is_none() {
                         meta.expected_len =
-                            payload_size(&self.buf[meta.payload.start..meta.payload.end])?;
+                            payload_size(&buf[meta.payload.start..meta.payload.end])?;
                     }
 
                     meta
@@ -178,9 +192,9 @@ impl MessageDeframer {
                     self.joining_hs
                         .insert(HandshakePayloadMeta {
                             message: Range { start: 0, end },
-                            payload,
+                            payload: payload(),
                             version,
-                            expected_len: payload_size(&self.buf[payload])?,
+                            expected_len: payload_size(&buf[payload()])?,
                             quic: false,
                         })
                 }
@@ -202,7 +216,7 @@ impl MessageDeframer {
             typ: ContentType::Handshake,
             version: meta.version,
             payload: Payload::new(
-                self.buf[meta.payload.start..meta.payload.start + expected_len].to_vec(),
+                buf[meta.payload.start..meta.payload.start + expected_len].to_vec(),
             ),
         };
 
@@ -212,7 +226,7 @@ impl MessageDeframer {
             // the payload start to point past the payload we're about to yield, and update the
             // `expected_len` to match the state of that remaining payload.
             meta.payload.start += expected_len;
-            meta.expected_len = payload_size(&self.buf[meta.payload.start..meta.payload.end])?;
+            meta.expected_len = payload_size(&buf[meta.payload.start..meta.payload.end])?;
         } else {
             // Otherwise, we've yielded the last handshake payload in the buffer, so we can
             // discard all of the bytes that we're previously buffered as handshake data.
