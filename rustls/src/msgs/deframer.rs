@@ -541,15 +541,19 @@ mod tests {
     }
 
     fn pop_first(d: &mut MessageDeframer, rl: &mut RecordLayer) {
-        let m = d.pop(rl).unwrap().unwrap().message;
-        assert_eq!(m.typ, ContentType::Handshake);
-        Message::try_from(m).unwrap();
+        d.pop(rl, |x| x, |_, result| {
+            let m = result.unwrap().unwrap().message;
+            assert_eq!(m.typ, ContentType::Handshake);
+            Message::try_from(m).unwrap();
+        })
     }
 
     fn pop_second(d: &mut MessageDeframer, rl: &mut RecordLayer) {
-        let m = d.pop(rl).unwrap().unwrap().message;
-        assert_eq!(m.typ, ContentType::Alert);
-        Message::try_from(m).unwrap();
+        d.pop(rl, |x| x, |_, result| {
+            let m = result.unwrap().unwrap().message;
+            assert_eq!(m.typ, ContentType::Alert);
+            Message::try_from(m).unwrap();
+        })
     }
 
     #[test]
@@ -666,7 +670,9 @@ mod tests {
         );
 
         let mut rl = RecordLayer::new();
-        assert_eq!(d.pop(&mut rl).unwrap_err(), Error::CorruptMessage);
+        d.pop(&mut rl, |x| x, |_, result| {
+            assert_eq!(result.unwrap_err(), Error::CorruptMessage);
+        })
     }
 
     #[test]
@@ -678,7 +684,9 @@ mod tests {
         );
 
         let mut rl = RecordLayer::new();
-        assert_eq!(d.pop(&mut rl).unwrap_err(), Error::CorruptMessage);
+        d.pop(&mut rl, |x| x, |_, result| {
+            assert_eq!(result.unwrap_err(), Error::CorruptMessage);
+        })
     }
 
     #[test]
@@ -690,7 +698,9 @@ mod tests {
         );
 
         let mut rl = RecordLayer::new();
-        assert_eq!(d.pop(&mut rl).unwrap_err(), Error::CorruptMessage);
+        d.pop(&mut rl, |x| x, |_, result| {
+            assert_eq!(result.unwrap_err(), Error::CorruptMessage);
+        })
     }
 
     #[test]
@@ -702,11 +712,13 @@ mod tests {
         );
 
         let mut rl = RecordLayer::new();
-        let m = d.pop(&mut rl).unwrap().unwrap().message;
-        assert_eq!(m.typ, ContentType::ApplicationData);
-        assert_eq!(m.payload.0.len(), 0);
-        assert!(!d.has_pending());
-        assert!(!d.desynced);
+        d.pop(&mut rl, |x| x, |_, result| {
+            let m = result.unwrap().unwrap().message;
+            assert_eq!(m.typ, ContentType::ApplicationData);
+            assert_eq!(m.payload.0.len(), 0);
+            assert!(!d.has_pending());
+            assert!(!d.desynced);
+        })
     }
 
     #[test]
@@ -718,9 +730,13 @@ mod tests {
         );
 
         let mut rl = RecordLayer::new();
-        assert_eq!(d.pop(&mut rl).unwrap_err(), Error::CorruptMessage);
+        d.pop(&mut rl, |x| x, |_, result| {
+            assert_eq!(result.unwrap_err(), Error::CorruptMessage);
+        });
         // CorruptMessage has been fused
-        assert_eq!(d.pop(&mut rl).unwrap_err(), Error::CorruptMessage);
+        d.pop(&mut rl, |x| x, |_, result| {
+            assert_eq!(result.unwrap_err(), Error::CorruptMessage);
+        });
     }
 
     #[test]
