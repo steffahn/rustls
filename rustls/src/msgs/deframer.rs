@@ -6,7 +6,7 @@ use super::enums::ContentType;
 use super::message::PlainMessage;
 use crate::error::Error;
 use crate::msgs::codec;
-use crate::msgs::message::{MessageError, OpaqueMessage};
+use crate::msgs::message::{BorrowedOpaqueMessage, MessageError};
 use crate::record_layer::{Decrypted, RecordLayer};
 use crate::ProtocolVersion;
 
@@ -31,6 +31,8 @@ pub struct MessageDeframer {
 
     /// What size prefix of `buf` is used.
     used: usize,
+
+    discard: usize,
 }
 
 impl MessageDeframer {
@@ -39,7 +41,10 @@ impl MessageDeframer {
     /// Returns an `Error` if the deframer failed to parse some message contents or if decryption
     /// failed, `Ok(None)` if no full message is buffered or if trial decryption failed, and
     /// `Ok(Some(_))` if a valid message was found and decrypted successfully.
-    pub fn pop(&mut self, record_layer: &mut RecordLayer) -> Result<Option<Deframed>, Error> {
+    pub fn pop<'a>(
+        &'a mut self,
+        record_layer: &mut RecordLayer,
+    ) -> Result<Option<Deframed<'a>>, Error> {
         if self.desynced {
             return Err(Error::CorruptMessage);
         } else if self.used == 0 {
@@ -67,8 +72,11 @@ impl MessageDeframer {
             // Does our `buf` contain a full message?  It does if it is big enough to
             // contain a header, and that header has a length which falls within `buf`.
             // If so, deframe it and place the message onto the frames output queue.
-            let m = match OpaqueMessage::read(&mut self.buf[start..self.used]) {
-                Ok(m) => m,
+            let m = match BorrowedOpaqueMessage::read(&mut self.buf[start..self.used]) {
+                Ok((m, rest)) => {
+                    drop(rest);
+                    m
+                }
                 Err(MessageError::TooShortForHeader | MessageError::TooShortForLength) => {
                     return Ok(None)
                 }
@@ -83,8 +91,8 @@ impl MessageDeframer {
             let end = start + m.len();
             if m.typ == ContentType::ChangeCipherSpec && self.joining_hs.is_none() {
                 // This is unencrypted. We check the contents later.
-                let message = m.to_plain_message();
-                self.discard(end);
+                let message = m.into_plain_message();
+                self.discard = end;
                 return Ok(Some(Deframed {
                     want_close_before_decrypt: false,
                     aligned: true,
@@ -110,7 +118,7 @@ impl MessageDeframer {
                     return Err(Error::PeerMisbehavedError(INTERLEAVED_ERROR.into()));
                 }
                 Ok(None) => {
-                    self.discard(end);
+                    self.discard = end;
                     continue;
                 }
                 Err(e) => return Err(e),
@@ -127,7 +135,7 @@ impl MessageDeframer {
 
             // If it's not a handshake message, just return it -- no joining necessary.
             if msg.typ != ContentType::Handshake {
-                self.discard(end);
+                self.discard = end;
                 return Ok(Some(Deframed {
                     want_close_before_decrypt: false,
                     aligned: true,
@@ -138,6 +146,12 @@ impl MessageDeframer {
 
             // If we don't know the payload size yet or if the payload size is larger
             // than the currently buffered payload, we need to wait for more data.
+
+            let payload_start = start + (BorrowedOpaqueMessage::HEADER_SIZE as usize);
+            let payload = payload_start..(payload_start + msg.payload.0.len());
+            let version = msg.version;
+            drop(msg);
+
             let meta = match &mut self.joining_hs {
                 Some(meta) => {
                     debug_assert_eq!(meta.quic, false);
@@ -145,11 +159,10 @@ impl MessageDeframer {
                     // We're joining a handshake message to the previous one here.
                     // Write it into the buffer and update the metadata.
 
-                    let dst =
-                        &mut self.buf[meta.payload.end..meta.payload.end + msg.payload.0.len()];
-                    dst.copy_from_slice(msg.payload.0.as_ref());
+                    self.buf
+                        .copy_within(payload, meta.payload.end);
                     meta.message.end = end;
-                    meta.payload.end += msg.payload.0.len();
+                    meta.payload.end += payload.len();
 
                     // If we haven't parsed the payload size yet, try to do so now.
                     if meta.expected_len.is_none() {
@@ -162,19 +175,12 @@ impl MessageDeframer {
                 None => {
                     // We've found a new handshake message here.
                     // Write it into the buffer and create the metadata.
-
-                    let expected_len = payload_size(msg.payload.0.as_ref())?;
-                    let dst = &mut self.buf[..msg.payload.0.len()];
-                    dst.copy_from_slice(msg.payload.0.as_ref());
                     self.joining_hs
                         .insert(HandshakePayloadMeta {
                             message: Range { start: 0, end },
-                            payload: Range {
-                                start: 0,
-                                end: msg.payload.0.len(),
-                            },
-                            version: msg.version,
-                            expected_len,
+                            payload,
+                            version,
+                            expected_len: payload_size(&self.buf[payload])?,
                             quic: false,
                         })
                 }
@@ -212,7 +218,7 @@ impl MessageDeframer {
             // discard all of the bytes that we're previously buffered as handshake data.
             let end = meta.message.end;
             self.joining_hs = None;
-            self.discard(end);
+            self.discard = end;
         }
 
         Ok(Some(Deframed {
@@ -307,7 +313,7 @@ impl MessageDeframer {
         // At this point, the buffer resizing logic below should reduce the buffer size.
         let allow_max = match self.joining_hs {
             Some(_) => MAX_HANDSHAKE_SIZE as usize,
-            None => OpaqueMessage::MAX_WIRE_SIZE,
+            None => BorrowedOpaqueMessage::MAX_WIRE_SIZE,
         };
 
         if self.used >= allow_max {
@@ -404,11 +410,11 @@ fn payload_size(buf: &[u8]) -> Result<Option<usize>, Error> {
 }
 
 #[derive(Debug)]
-pub struct Deframed {
+pub struct Deframed<'a> {
     pub want_close_before_decrypt: bool,
     pub aligned: bool,
     pub trial_decryption_finished: bool,
-    pub message: PlainMessage,
+    pub message: PlainMessage<'a>,
 }
 
 #[derive(Debug)]
@@ -430,7 +436,7 @@ const INTERLEAVED_ERROR: &str = "";
 #[cfg(test)]
 mod tests {
     use super::MessageDeframer;
-    use crate::msgs::message::{Message, OpaqueMessage};
+    use crate::msgs::message::{BorrowedOpaqueMessage, Message};
     use crate::record_layer::RecordLayer;
     use crate::{ContentType, Error};
 
@@ -711,7 +717,7 @@ mod tests {
         assert_len(4096, input_bytes(&mut d, &message));
         assert_len(4096, input_bytes(&mut d, &message));
         assert_len(
-            OpaqueMessage::MAX_WIRE_SIZE - 16_384,
+            BorrowedOpaqueMessage::MAX_WIRE_SIZE - 16_384,
             input_bytes(&mut d, &message),
         );
         assert!(input_bytes(&mut d, &message).is_err());

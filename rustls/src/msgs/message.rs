@@ -71,22 +71,40 @@ impl MessagePayload {
     }
 }
 
+#[derive(Debug)]
+pub struct OpaqueMessage {
+    pub typ: ContentType,
+    pub version: ProtocolVersion,
+    pub payload: Vec<u8>,
+}
+
+impl OpaqueMessage {
+    pub fn encode(self) -> Vec<u8> {
+        let mut buf = Vec::new();
+        self.typ.encode(&mut buf);
+        self.version.encode(&mut buf);
+        (self.payload.len() as u16).encode(&mut buf);
+        buf.extend_from_slice(self.payload.as_ref());
+        buf
+    }
+}
+
 /// A TLS frame, named TLSPlaintext in the standard.
 ///
 /// This type owns all memory for its interior parts. It is used to read/write from/to I/O
 /// buffers as well as for fragmenting, joining and encryption/decryption. It can be converted
 /// into a `Message` by decoding the payload.
 #[derive(Debug)]
-pub struct OpaqueMessage<'a> {
+pub struct BorrowedOpaqueMessage<'a> {
     pub typ: ContentType,
     pub version: ProtocolVersion,
-    pub payload: Buffer<'a>,
+    pub payload: &'a mut [u8],
 }
 
-impl<'a> OpaqueMessage<'a> {
+impl<'a> BorrowedOpaqueMessage<'a> {
     /// `MessageError` allows callers to distinguish between valid prefixes (might
     /// become valid if we read more data) and invalid data.
-    pub fn read(buf: &'a mut [u8]) -> Result<Self, MessageError> {
+    pub fn read(buf: &'a mut [u8]) -> Result<(Self, &'a mut [u8]), MessageError> {
         let mut r = Reader::init(&buf);
         let typ = ContentType::read(&mut r).ok_or(MessageError::TooShortForHeader)?;
         let version = ProtocolVersion::read(&mut r).ok_or(MessageError::TooShortForHeader)?;
@@ -122,35 +140,31 @@ impl<'a> OpaqueMessage<'a> {
         }
 
         let end = (Self::HEADER_SIZE + len) as usize;
-        Ok(Self {
-            typ,
-            version,
-            payload: Buffer::Slice(&mut buf[Self::HEADER_SIZE as usize..end]),
-        })
+        let (this, rest) = buf.split_at_mut(end);
+        let (_, payload) = this.split_at_mut(Self::HEADER_SIZE as usize);
+        Ok((
+            Self {
+                typ,
+                version,
+                payload,
+            },
+            rest,
+        ))
     }
 
-    pub fn encode(self) -> Vec<u8> {
-        let mut buf = Vec::new();
-        self.typ.encode(&mut buf);
-        self.version.encode(&mut buf);
-        (self.payload.len() as u16).encode(&mut buf);
-        buf.extend_from_slice(self.payload.as_ref());
-        buf
-    }
-
-    pub fn to_plain_message(&self) -> PlainMessage {
+    pub fn into_plain_message(self) -> PlainMessage<'a> {
         PlainMessage {
             version: self.version,
             typ: self.typ,
-            payload: Payload::new(self.payload.as_ref().to_vec()),
+            payload: Payload::new(&*self.payload),
         }
     }
 
-    pub fn to_owned(&self) -> OpaqueMessage<'static> {
+    pub fn to_owned(&self) -> OpaqueMessage {
         OpaqueMessage {
             version: self.version,
             typ: self.typ,
-            payload: Buffer::Vec(self.payload.as_ref().to_vec()),
+            payload: self.payload.as_ref().to_vec(),
         }
     }
 
@@ -164,13 +178,13 @@ impl<'a> OpaqueMessage<'a> {
     const MAX_PAYLOAD: u16 = 16384 + 2048;
 
     /// Content type, version and size.
-    const HEADER_SIZE: u16 = 1 + 2 + 2;
+    pub const HEADER_SIZE: u16 = 1 + 2 + 2;
 
     /// Maximum on-wire message size.
     pub const MAX_WIRE_SIZE: usize = (Self::MAX_PAYLOAD + Self::HEADER_SIZE) as usize;
 }
 
-impl From<Message> for PlainMessage {
+impl<'a> From<Message> for PlainMessage<'a> {
     fn from(msg: Message) -> Self {
         let typ = msg.payload.content_type();
         let payload = match msg.payload {
@@ -195,18 +209,18 @@ impl From<Message> for PlainMessage {
 /// This type owns all memory for its interior parts. It can be decrypted from an OpaqueMessage
 /// or encrypted into an OpaqueMessage, and it is also used for joining and fragmenting.
 #[derive(Clone, Debug)]
-pub struct PlainMessage {
+pub struct PlainMessage<'a> {
     pub typ: ContentType,
     pub version: ProtocolVersion,
-    pub payload: Payload<'static>,
+    pub payload: Payload<'a>,
 }
 
-impl PlainMessage {
-    pub fn into_unencrypted_opaque(self) -> OpaqueMessage<'static> {
+impl<'a> PlainMessage<'a> {
+    pub fn into_unencrypted_opaque(self) -> OpaqueMessage {
         OpaqueMessage {
             version: self.version,
             typ: self.typ,
-            payload: Buffer::Vec(self.payload.0.into_owned()),
+            payload: self.payload.0.into_owned(),
         }
     }
 
@@ -258,13 +272,13 @@ impl Message {
 ///
 /// A [`PlainMessage`] must contain plaintext content. Encrypted content should be stored in an
 /// [`OpaqueMessage`] and decrypted before being stored into a [`PlainMessage`].
-impl TryFrom<PlainMessage> for Message {
+impl<'a> TryFrom<PlainMessage<'a>> for Message {
     type Error = Error;
 
-    fn try_from(plain: PlainMessage) -> Result<Self, Self::Error> {
+    fn try_from(plain: PlainMessage<'_>) -> Result<Self, Self::Error> {
         Ok(Self {
             version: plain.version,
-            payload: MessagePayload::new(plain.typ, plain.version, plain.payload)?,
+            payload: MessagePayload::new(plain.typ, plain.version, plain.payload.to_owned())?,
         })
     }
 }
@@ -288,7 +302,7 @@ impl<'a> BorrowedPlainMessage<'a> {
         OpaqueMessage {
             version: self.version,
             typ: self.typ,
-            payload: Buffer::Vec(self.payload.to_vec()),
+            payload: self.payload.to_vec(),
         }
     }
 }

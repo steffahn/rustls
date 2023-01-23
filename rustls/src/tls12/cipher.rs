@@ -4,7 +4,9 @@ use crate::error::Error;
 use crate::msgs::codec;
 use crate::msgs::enums::ContentType;
 use crate::msgs::fragmenter::MAX_FRAGMENT_LEN;
-use crate::msgs::message::{BorrowedPlainMessage, OpaqueMessage, PlainMessage};
+use crate::msgs::message::{
+    BorrowedOpaqueMessage, BorrowedPlainMessage, OpaqueMessage, PlainMessage,
+};
 
 use ring::aead;
 
@@ -111,24 +113,27 @@ const GCM_EXPLICIT_NONCE_LEN: usize = 8;
 const GCM_OVERHEAD: usize = GCM_EXPLICIT_NONCE_LEN + 16;
 
 impl MessageDecrypter for GcmMessageDecrypter {
-    fn decrypt(&self, mut msg: OpaqueMessage, seq: u64) -> Result<PlainMessage, Error> {
-        let payload = &mut msg.payload;
-        if payload.len() < GCM_OVERHEAD {
+    fn decrypt<'m>(
+        &self,
+        mut msg: BorrowedOpaqueMessage<'m>,
+        seq: u64,
+    ) -> Result<PlainMessage<'m>, Error> {
+        if msg.payload.len() < GCM_OVERHEAD {
             return Err(Error::DecryptError);
         }
 
         let nonce = {
             let mut nonce = [0u8; 12];
             nonce[..4].copy_from_slice(&self.dec_salt);
-            nonce[4..].copy_from_slice(&payload.as_ref()[..8]);
+            nonce[4..].copy_from_slice(&msg.payload[..8]);
             aead::Nonce::assume_unique_for_key(nonce)
         };
 
-        let aad = make_tls12_aad(seq, msg.typ, msg.version, payload.len() - GCM_OVERHEAD);
+        let aad = make_tls12_aad(seq, msg.typ, msg.version, msg.payload.len() - GCM_OVERHEAD);
 
         let plain_len = self
             .dec_key
-            .open_within(nonce, aad, payload.as_mut(), GCM_EXPLICIT_NONCE_LEN..)
+            .open_within(nonce, aad, msg.payload, GCM_EXPLICIT_NONCE_LEN..)
             .map_err(|_| Error::DecryptError)?
             .len();
 
@@ -136,17 +141,13 @@ impl MessageDecrypter for GcmMessageDecrypter {
             return Err(Error::PeerSentOversizedRecord);
         }
 
-        payload.truncate(plain_len);
-        Ok(msg.to_plain_message())
+        msg.payload = &mut msg.payload[..plain_len];
+        Ok(msg.into_plain_message())
     }
 }
 
 impl MessageEncrypter for GcmMessageEncrypter {
-    fn encrypt(
-        &self,
-        msg: BorrowedPlainMessage,
-        seq: u64,
-    ) -> Result<OpaqueMessage<'static>, Error> {
+    fn encrypt(&self, msg: BorrowedPlainMessage, seq: u64) -> Result<OpaqueMessage, Error> {
         let nonce = make_nonce(&self.iv, seq);
         let aad = make_tls12_aad(seq, msg.typ, msg.version, msg.payload.len());
 
@@ -187,10 +188,12 @@ struct ChaCha20Poly1305MessageDecrypter {
 const CHACHAPOLY1305_OVERHEAD: usize = 16;
 
 impl MessageDecrypter for ChaCha20Poly1305MessageDecrypter {
-    fn decrypt(&self, mut msg: OpaqueMessage, seq: u64) -> Result<PlainMessage, Error> {
-        let payload = &mut msg.payload;
-
-        if payload.len() < CHACHAPOLY1305_OVERHEAD {
+    fn decrypt<'m>(
+        &self,
+        mut msg: BorrowedOpaqueMessage<'m>,
+        seq: u64,
+    ) -> Result<PlainMessage<'m>, Error> {
+        if msg.payload.len() < CHACHAPOLY1305_OVERHEAD {
             return Err(Error::DecryptError);
         }
 
@@ -199,12 +202,12 @@ impl MessageDecrypter for ChaCha20Poly1305MessageDecrypter {
             seq,
             msg.typ,
             msg.version,
-            payload.len() - CHACHAPOLY1305_OVERHEAD,
+            msg.payload.len() - CHACHAPOLY1305_OVERHEAD,
         );
 
         let plain_len = self
             .dec_key
-            .open_in_place(nonce, aad, payload.as_mut())
+            .open_in_place(nonce, aad, msg.payload)
             .map_err(|_| Error::DecryptError)?
             .len();
 
@@ -212,17 +215,13 @@ impl MessageDecrypter for ChaCha20Poly1305MessageDecrypter {
             return Err(Error::PeerSentOversizedRecord);
         }
 
-        payload.truncate(plain_len);
-        Ok(msg.to_plain_message())
+        msg.payload = &mut msg.payload[..plain_len];
+        Ok(msg.into_plain_message())
     }
 }
 
 impl MessageEncrypter for ChaCha20Poly1305MessageEncrypter {
-    fn encrypt(
-        &self,
-        msg: BorrowedPlainMessage,
-        seq: u64,
-    ) -> Result<OpaqueMessage<'static>, Error> {
+    fn encrypt(&self, msg: BorrowedPlainMessage, seq: u64) -> Result<OpaqueMessage, Error> {
         let nonce = make_nonce(&self.enc_offset, seq);
         let aad = make_tls12_aad(seq, msg.typ, msg.version, msg.payload.len());
 

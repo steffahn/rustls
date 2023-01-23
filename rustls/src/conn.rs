@@ -847,10 +847,10 @@ impl CommonState {
     }
 
     /// Handle state changes from deframed messages.
-    fn deframed(
+    fn deframed<'m>(
         &mut self,
-        result: Result<Option<Deframed>, Error>,
-    ) -> Result<Option<PlainMessage>, Error> {
+        result: Result<Option<Deframed<'m>>, Error>,
+    ) -> Result<Option<PlainMessage<'m>>, Error> {
         match result {
             Ok(Some(Deframed {
                 want_close_before_decrypt,

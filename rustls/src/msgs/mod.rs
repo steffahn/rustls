@@ -31,15 +31,15 @@ mod message_test;
 mod test {
     #[test]
     fn smoketest() {
-        use super::message::{Message, OpaqueMessage};
+        use super::message::{BorrowedOpaqueMessage, Message};
         let mut bytes = include_bytes!("handshake-test.1.bin").to_vec();
 
         let mut cur = 0;
         while cur < bytes.len() {
-            let m = OpaqueMessage::read(&mut bytes[cur..]).unwrap();
+            let m = BorrowedOpaqueMessage::read(&mut bytes[cur..]).unwrap();
             cur += m.len();
 
-            Message::try_from(m.to_plain_message()).unwrap();
+            Message::try_from(m.into_plain_message()).unwrap();
         }
     }
 }

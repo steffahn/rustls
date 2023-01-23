@@ -2,7 +2,7 @@ use crate::msgs::base::{PayloadU16, PayloadU24, PayloadU8};
 
 use super::base::Payload;
 use super::enums::{AlertDescription, AlertLevel, HandshakeType};
-use super::message::{Message, OpaqueMessage, PlainMessage};
+use super::message::{BorrowedOpaqueMessage, Message, PlainMessage};
 
 use std::fs;
 use std::io::Read;
@@ -26,9 +26,9 @@ fn test_read_fuzz_corpus() {
         let mut bytes = Vec::new();
         f.read_to_end(&mut bytes).unwrap();
 
-        let msg = OpaqueMessage::read(&mut bytes).unwrap();
+        let msg = BorrowedOpaqueMessage::read(&mut bytes).unwrap();
         let used = msg.len();
-        let msg = msg.to_plain_message();
+        let msg = msg.into_plain_message();
         println!("{:?}", msg);
 
         let msg = match Message::try_from(msg) {
@@ -67,9 +67,9 @@ fn can_read_safari_client_hello() {
         \x79\x2f\x33\x08\x68\x74\x74\x70\x2f\x31\x2e\x31\x00\x0b\x00\x02\
         \x01\x00\x00\x0a\x00\x0a\x00\x08\x00\x1d\x00\x17\x00\x18\x00\x19"
         .to_vec();
-    let m = OpaqueMessage::read(&mut bytes).unwrap();
+    let m = BorrowedOpaqueMessage::read(&mut bytes).unwrap();
     println!("m = {:?}", m);
-    assert!(Message::try_from(m.to_plain_message()).is_err());
+    assert!(Message::try_from(m.into_plain_message()).is_err());
 }
 
 #[test]
@@ -94,9 +94,9 @@ fn construct_all_types() {
         b"\x18\x03\x04\x00\x04\x11\x22\x33\x44".to_vec(),
     ];
     for mut bytes in samples.into_iter() {
-        let m = OpaqueMessage::read(&mut bytes).unwrap();
+        let m = BorrowedOpaqueMessage::read(&mut bytes).unwrap();
         println!("m = {:?}", m);
-        let plain = m.to_plain_message();
+        let plain = m.into_plain_message();
         let m = Message::try_from(plain);
         println!("m' = {:?}", m);
     }

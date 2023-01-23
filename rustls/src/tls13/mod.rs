@@ -4,7 +4,9 @@ use crate::error::Error;
 use crate::msgs::codec::Codec;
 use crate::msgs::enums::ContentType;
 use crate::msgs::fragmenter::MAX_FRAGMENT_LEN;
-use crate::msgs::message::{BorrowedPlainMessage, Buffer, OpaqueMessage, PlainMessage};
+use crate::msgs::message::{
+    BorrowedOpaqueMessage, BorrowedPlainMessage, OpaqueMessage, PlainMessage,
+};
 use crate::suites::{BulkAlgorithm, CipherSuiteCommon, SupportedCipherSuite};
 
 use ring::aead;
@@ -118,19 +120,16 @@ struct Tls13MessageDecrypter {
     iv: Iv,
 }
 
-fn unpad_tls13(v: &mut Buffer<'_>) -> ContentType {
+fn unpad_tls13(v: &mut [u8]) -> (ContentType, &mut [u8]) {
     let slice = v.as_ref();
     let pos = match slice.iter().rposition(|&b| b != 0) {
         Some(b) => b,
         None => {
-            v.truncate(0);
-            return ContentType::Unknown(0);
+            return (ContentType::Unknown(0), v.split_at_mut(0).0);
         }
     };
 
-    let ty = ContentType::from(slice[pos]);
-    v.truncate(pos);
-    ty
+    (ContentType::from(slice[pos]), v.split_at_mut(pos).0)
 }
 
 fn make_tls13_aad(len: usize) -> ring::aead::Aad<[u8; TLS13_AAD_SIZE]> {
@@ -147,11 +146,7 @@ fn make_tls13_aad(len: usize) -> ring::aead::Aad<[u8; TLS13_AAD_SIZE]> {
 const TLS13_AAD_SIZE: usize = 1 + 2 + 2;
 
 impl MessageEncrypter for Tls13MessageEncrypter {
-    fn encrypt(
-        &self,
-        msg: BorrowedPlainMessage,
-        seq: u64,
-    ) -> Result<OpaqueMessage<'static>, Error> {
+    fn encrypt(&self, msg: BorrowedPlainMessage, seq: u64) -> Result<OpaqueMessage, Error> {
         let total_len = msg.payload.len() + 1 + self.enc_key.algorithm().tag_len();
         let mut payload = Vec::with_capacity(total_len);
         payload.extend_from_slice(msg.payload);
@@ -173,37 +168,41 @@ impl MessageEncrypter for Tls13MessageEncrypter {
 }
 
 impl MessageDecrypter for Tls13MessageDecrypter {
-    fn decrypt(&self, mut msg: OpaqueMessage, seq: u64) -> Result<PlainMessage, Error> {
-        let payload = &mut msg.payload;
-        if payload.len() < self.dec_key.algorithm().tag_len() {
+    fn decrypt<'m>(
+        &self,
+        mut msg: BorrowedOpaqueMessage<'m>,
+        seq: u64,
+    ) -> Result<PlainMessage<'m>, Error> {
+        if msg.payload.len() < self.dec_key.algorithm().tag_len() {
             return Err(Error::DecryptError);
         }
 
         let nonce = make_nonce(&self.iv, seq);
-        let aad = make_tls13_aad(payload.len());
+        let aad = make_tls13_aad(msg.payload.len());
         let plain_len = self
             .dec_key
-            .open_in_place(nonce, aad, payload.as_mut())
+            .open_in_place(nonce, aad, msg.payload)
             .map_err(|_| Error::DecryptError)?
             .len();
 
-        payload.truncate(plain_len);
-
-        if payload.len() > MAX_FRAGMENT_LEN + 1 {
+        msg.payload = &mut msg.payload[..plain_len];
+        if msg.payload.len() > MAX_FRAGMENT_LEN + 1 {
             return Err(Error::PeerSentOversizedRecord);
         }
 
-        msg.typ = unpad_tls13(payload);
+        let (typ, unpadded) = unpad_tls13(msg.payload);
+        msg.typ = typ;
         if msg.typ == ContentType::Unknown(0) {
             let msg = "peer sent bad TLSInnerPlaintext".to_string();
             return Err(Error::PeerMisbehavedError(msg));
         }
 
-        if payload.len() > MAX_FRAGMENT_LEN {
+        msg.payload = unpadded;
+        if msg.payload.len() > MAX_FRAGMENT_LEN {
             return Err(Error::PeerSentOversizedRecord);
         }
 
         msg.version = ProtocolVersion::TLSv1_3;
-        Ok(msg.to_plain_message())
+        Ok(msg.into_plain_message())
     }
 }

@@ -1,6 +1,8 @@
 use crate::error::Error;
 use crate::msgs::codec;
-use crate::msgs::message::{BorrowedPlainMessage, OpaqueMessage, PlainMessage};
+use crate::msgs::message::{
+    BorrowedOpaqueMessage, BorrowedPlainMessage, OpaqueMessage, PlainMessage,
+};
 
 use ring::{aead, hkdf};
 
@@ -8,12 +10,16 @@ use ring::{aead, hkdf};
 pub trait MessageDecrypter: Send + Sync {
     /// Perform the decryption over the concerned TLS message.
 
-    fn decrypt(&self, m: OpaqueMessage, seq: u64) -> Result<PlainMessage, Error>;
+    fn decrypt<'m>(
+        &self,
+        m: BorrowedOpaqueMessage<'m>,
+        seq: u64,
+    ) -> Result<PlainMessage<'m>, Error>;
 }
 
 /// Objects with this trait can encrypt TLS messages.
 pub(crate) trait MessageEncrypter: Send + Sync {
-    fn encrypt(&self, m: BorrowedPlainMessage, seq: u64) -> Result<OpaqueMessage<'static>, Error>;
+    fn encrypt(&self, m: BorrowedPlainMessage, seq: u64) -> Result<OpaqueMessage, Error>;
 }
 
 impl dyn MessageEncrypter {
@@ -86,11 +92,7 @@ pub(crate) fn make_nonce(iv: &Iv, seq: u64) -> ring::aead::Nonce {
 struct InvalidMessageEncrypter {}
 
 impl MessageEncrypter for InvalidMessageEncrypter {
-    fn encrypt(
-        &self,
-        _m: BorrowedPlainMessage,
-        _seq: u64,
-    ) -> Result<OpaqueMessage<'static>, Error> {
+    fn encrypt(&self, _m: BorrowedPlainMessage, _seq: u64) -> Result<OpaqueMessage, Error> {
         Err(Error::General("encrypt not yet available".to_string()))
     }
 }
@@ -99,7 +101,11 @@ impl MessageEncrypter for InvalidMessageEncrypter {
 struct InvalidMessageDecrypter {}
 
 impl MessageDecrypter for InvalidMessageDecrypter {
-    fn decrypt(&self, _m: OpaqueMessage, _seq: u64) -> Result<PlainMessage, Error> {
+    fn decrypt<'m>(
+        &self,
+        _m: BorrowedOpaqueMessage<'m>,
+        _seq: u64,
+    ) -> Result<PlainMessage<'m>, Error> {
         Err(Error::DecryptError)
     }
 }

@@ -1,6 +1,8 @@
 use crate::cipher::{MessageDecrypter, MessageEncrypter};
 use crate::error::Error;
-use crate::msgs::message::{BorrowedPlainMessage, OpaqueMessage, PlainMessage};
+use crate::msgs::message::{
+    BorrowedOpaqueMessage, BorrowedPlainMessage, OpaqueMessage, PlainMessage,
+};
 
 #[cfg(feature = "logging")]
 use crate::log::trace;
@@ -155,14 +157,14 @@ impl RecordLayer {
     /// `encr` is a decoded message allegedly received from the peer.
     /// If it can be decrypted, its decryption is returned.  Otherwise,
     /// an error is returned.
-    pub(crate) fn decrypt_incoming(
+    pub(crate) fn decrypt_incoming<'m>(
         &mut self,
-        encr: OpaqueMessage,
-    ) -> Result<Option<Decrypted>, Error> {
+        encr: BorrowedOpaqueMessage<'m>,
+    ) -> Result<Option<Decrypted<'m>>, Error> {
         if self.decrypt_state != DirectionState::Active {
             return Ok(Some(Decrypted {
                 want_close_before_decrypt: false,
-                plaintext: encr.to_plain_message(),
+                plaintext: encr.into_plain_message(),
             }));
         }
 
@@ -200,10 +202,7 @@ impl RecordLayer {
     ///
     /// `plain` is a TLS message we'd like to send.  This function
     /// panics if the requisite keying material hasn't been established yet.
-    pub(crate) fn encrypt_outgoing(
-        &mut self,
-        plain: BorrowedPlainMessage,
-    ) -> OpaqueMessage<'static> {
+    pub(crate) fn encrypt_outgoing(&mut self, plain: BorrowedPlainMessage) -> OpaqueMessage {
         debug_assert!(self.encrypt_state == DirectionState::Active);
         assert!(!self.encrypt_exhausted());
         let seq = self.write_seq;
@@ -216,9 +215,9 @@ impl RecordLayer {
 
 /// Result of decryption.
 #[derive(Debug)]
-pub struct Decrypted {
+pub struct Decrypted<'a> {
     /// Whether the peer appears to be getting close to encrypting too many messages with this key.
     pub want_close_before_decrypt: bool,
     /// The decrypted message.
-    pub plaintext: PlainMessage,
+    pub plaintext: PlainMessage<'a>,
 }

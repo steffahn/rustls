@@ -4,7 +4,7 @@ use std::io;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
-use rustls::internal::msgs::message::{Message, OpaqueMessage, PlainMessage};
+use rustls::internal::msgs::message::{BorrowedOpaqueMessage, Message, PlainMessage};
 use rustls::server::AllowAnyAuthenticatedClient;
 use rustls::Connection;
 use rustls::Error;
@@ -155,10 +155,10 @@ where
 
         let mut cur = 0;
         while cur < sz {
-            let message = OpaqueMessage::read(&mut buf[cur..]).unwrap();
+            let message = BorrowedOpaqueMessage::read(&mut buf[cur..]).unwrap();
             cur += message.len();
 
-            let mut message = Message::try_from(message.to_plain_message()).unwrap();
+            let mut message = Message::try_from(message.into_plain_message()).unwrap();
             let message_enc = match filter(&mut message) {
                 Altered::InPlace => PlainMessage::from(message)
                     .into_unencrypted_opaque()
